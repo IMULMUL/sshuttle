@@ -1,7 +1,7 @@
 import socket
 from sshuttle.firewall import subnet_weight
 from sshuttle.helpers import family_to_string, which, debug2
-from sshuttle.linux import ipt, ipt_ttl, ipt_chain_exists, nonfatal
+from sshuttle.linux import ipt, ipt_chain_exists, nonfatal
 from sshuttle.methods import BaseMethod
 
 
@@ -13,22 +13,17 @@ class Method(BaseMethod):
     # recently-started one will win (because we use "-I OUTPUT 1" instead of
     # "-A OUTPUT").
     def setup_firewall(self, port, dnsport, nslist, family, subnets, udp,
-                       user, ttl):
-        # only ipv4 supported with NAT
-        if family != socket.AF_INET:
+                       user, group, tmark):
+        if family != socket.AF_INET and family != socket.AF_INET6:
             raise Exception(
                 'Address family "%s" unsupported by nat method_name'
                 % family_to_string(family))
         if udp:
             raise Exception("UDP not supported by nat method_name")
-
         table = "nat"
 
         def _ipt(*args):
             return ipt(family, table, *args)
-
-        def _ipt_ttl(*args):
-            return ipt_ttl(family, table, *args)
 
         def _ipm(*args):
             return ipt(family, "mangle", *args)
@@ -36,13 +31,20 @@ class Method(BaseMethod):
         chain = 'sshuttle-%s' % port
 
         # basic cleanup/setup of chains
-        self.restore_firewall(port, family, udp, user)
+        self.restore_firewall(port, family, udp, user, group)
 
         _ipt('-N', chain)
         _ipt('-F', chain)
-        if user is not None:
-            _ipm('-I', 'OUTPUT', '1', '-m', 'owner', '--uid-owner', str(user),
-                 '-j', 'MARK', '--set-mark', str(port))
+        if user is not None or group is not None:
+            margs = ['-I', 'OUTPUT', '1', '-m', 'owner']
+            if user is not None:
+                margs += ['--uid-owner', str(user)]
+            if group is not None:
+                # --suppl-groups also matches the group in a process's
+                # supplementary groups, not only its primary gid.
+                margs += ['--gid-owner', str(group), '--suppl-groups']
+            margs += ['-j', 'MARK', '--set-mark', str(port)]
+            nonfatal(_ipm, *margs)
             args = '-m', 'mark', '--mark', str(port), '-j', chain
         else:
             args = '-j', chain
@@ -50,24 +52,14 @@ class Method(BaseMethod):
         _ipt('-I', 'OUTPUT', '1', *args)
         _ipt('-I', 'PREROUTING', '1', *args)
 
-        # This TTL hack allows the client and server to run on the
-        # same host. The connections the sshuttle server makes will
-        # have TTL set to 63.
-        _ipt_ttl('-A', chain, '-j', 'RETURN', '-m', 'ttl', '--ttl', '%s' % ttl)
-
         # Redirect DNS traffic as requested. This includes routing traffic
         # to localhost DNS servers through sshuttle.
         for _, ip in [i for i in nslist if i[0] == family]:
             _ipt('-A', chain, '-j', 'REDIRECT',
-                 '--dest', '%s/32' % ip,
+                 '--dest', '%s' % ip,
                  '-p', 'udp',
                  '--dport', '53',
                  '--to-ports', str(dnsport))
-
-        # Don't route any remaining local traffic through sshuttle.
-        _ipt('-A', chain, '-j', 'RETURN',
-             '-m', 'addrtype',
-             '--dst-type', 'LOCAL')
 
         # create new subnet entries.
         for _, swidth, sexclude, snet, fport, lport \
@@ -85,9 +77,14 @@ class Method(BaseMethod):
                      '--dest', '%s/%s' % (snet, swidth),
                      *(tcp_ports + ('--to-ports', str(port))))
 
-    def restore_firewall(self, port, family, udp, user):
+        # Don't route any remaining local traffic through sshuttle.
+        _ipt('-A', chain, '-j', 'RETURN',
+             '-m', 'addrtype',
+             '--dst-type', 'LOCAL')
+
+    def restore_firewall(self, port, family, udp, user, group):
         # only ipv4 supported with NAT
-        if family != socket.AF_INET:
+        if family != socket.AF_INET and family != socket.AF_INET6:
             raise Exception(
                 'Address family "%s" unsupported by nat method_name'
                 % family_to_string(family))
@@ -99,9 +96,6 @@ class Method(BaseMethod):
         def _ipt(*args):
             return ipt(family, table, *args)
 
-        def _ipt_ttl(*args):
-            return ipt_ttl(family, table, *args)
-
         def _ipm(*args):
             return ipt(family, "mangle", *args)
 
@@ -109,9 +103,15 @@ class Method(BaseMethod):
 
         # basic cleanup/setup of chains
         if ipt_chain_exists(family, table, chain):
-            if user is not None:
-                nonfatal(_ipm, '-D', 'OUTPUT', '-m', 'owner', '--uid-owner',
-                         str(user), '-j', 'MARK', '--set-mark', str(port))
+            if user is not None or group is not None:
+                margs = ['-D', 'OUTPUT', '-m', 'owner']
+                if user is not None:
+                    margs += ['--uid-owner', str(user)]
+                if group is not None:
+                    margs += ['--gid-owner', str(group), '--suppl-groups']
+                margs += ['-j', 'MARK', '--set-mark', str(port)]
+                nonfatal(_ipm, *margs)
+
                 args = '-m', 'mark', '--mark', str(port), '-j', chain
             else:
                 args = '-j', chain
@@ -123,6 +123,8 @@ class Method(BaseMethod):
     def get_supported_features(self):
         result = super(Method, self).get_supported_features()
         result.user = True
+        result.ipv6 = True
+        result.group = True
         return result
 
     def is_supported(self):

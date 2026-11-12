@@ -6,22 +6,12 @@ from unittest.mock import Mock, patch, call
 from sshuttle.methods import get_method
 
 
-@patch("sshuttle.methods.tproxy.recvmsg")
-def test_get_supported_features_recvmsg(mock_recvmsg):
+def test_get_supported_features():
     method = get_method('tproxy')
     features = method.get_supported_features()
     assert features.ipv6
     assert features.udp
     assert features.dns
-
-
-@patch("sshuttle.methods.tproxy.recvmsg", None)
-def test_get_supported_features_norecvmsg():
-    method = get_method('tproxy')
-    features = method.get_supported_features()
-    assert features.ipv6
-    assert not features.udp
-    assert not features.dns
 
 
 def test_get_tcp_dstip():
@@ -88,13 +78,12 @@ def test_assert_features():
 
 def test_firewall_command():
     method = get_method('tproxy')
-    assert not method.firewall_command("somthing")
+    assert not method.firewall_command("something")
 
 
 @patch('sshuttle.methods.tproxy.ipt')
-@patch('sshuttle.methods.tproxy.ipt_ttl')
 @patch('sshuttle.methods.tproxy.ipt_chain_exists')
-def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
+def test_setup_firewall(mock_ipt_chain_exists, mock_ipt):
     mock_ipt_chain_exists.return_value = True
     method = get_method('tproxy')
     assert method.name == 'tproxy'
@@ -109,13 +98,13 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
             (AF_INET6, 128, True, u'2404:6800:4004:80c::101f', 8080, 8080)],
         True,
         None,
-        63)
+        None,
+        '0x01')
     assert mock_ipt_chain_exists.mock_calls == [
         call(AF_INET6, 'mangle', 'sshuttle-m-1024'),
         call(AF_INET6, 'mangle', 'sshuttle-t-1024'),
         call(AF_INET6, 'mangle', 'sshuttle-d-1024')
     ]
-    assert mock_ipt_ttl.mock_calls == []
     assert mock_ipt.mock_calls == [
         call(AF_INET6, 'mangle', '-D', 'OUTPUT', '-j', 'sshuttle-m-1024'),
         call(AF_INET6, 'mangle', '-F', 'sshuttle-m-1024'),
@@ -134,24 +123,24 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
         call(AF_INET6, 'mangle', '-I', 'OUTPUT', '1', '-j', 'sshuttle-m-1024'),
         call(AF_INET6, 'mangle', '-I', 'PREROUTING', '1', '-j',
              'sshuttle-t-1024'),
+        call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'MARK',
+             '--set-mark', '0x01', '--dest', u'2404:6800:4004:80c::33/128',
+             '-m', 'udp', '-p', 'udp', '--dport', '53'),
+        call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-j', 'TPROXY',
+             '--tproxy-mark', '0x01',
+             '--dest', u'2404:6800:4004:80c::33/128',
+             '-m', 'udp', '-p', 'udp', '--dport', '53', '--on-port', '1026'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-j', 'RETURN',
              '-m', 'addrtype', '--dst-type', 'LOCAL'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'RETURN',
              '-m', 'addrtype', '--dst-type', 'LOCAL'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-d-1024', '-j', 'MARK',
-             '--set-mark', '1'),
+             '--set-mark', '0x01'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-d-1024', '-j', 'ACCEPT'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-m', 'socket',
              '-j', 'sshuttle-d-1024', '-m', 'tcp', '-p', 'tcp'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-m', 'socket',
              '-j', 'sshuttle-d-1024', '-m', 'udp', '-p', 'udp'),
-        call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'2404:6800:4004:80c::33/32',
-             '-m', 'udp', '-p', 'udp', '--dport', '53'),
-        call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1',
-             '--dest', u'2404:6800:4004:80c::33/32',
-             '-m', 'udp', '-p', 'udp', '--dport', '53', '--on-port', '1026'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'RETURN',
              '--dest', u'2404:6800:4004:80c::101f/128',
              '-m', 'tcp', '-p', 'tcp', '--dport', '8080:8080'),
@@ -165,31 +154,31 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
              '--dest', u'2404:6800:4004:80c::101f/128',
              '-m', 'udp', '-p', 'udp', '--dport', '8080:8080'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'2404:6800:4004:80c::/64',
+             '--set-mark', '0x01', '--dest', u'2404:6800:4004:80c::/64',
              '-m', 'tcp', '-p', 'tcp', '--dport', '8000:9000'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1', '--dest', u'2404:6800:4004:80c::/64',
+             '--tproxy-mark', '0x01', '--dest',
+             u'2404:6800:4004:80c::/64',
              '-m', 'tcp', '-p', 'tcp', '--dport', '8000:9000',
              '--on-port', '1024'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-m-1024', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'2404:6800:4004:80c::/64',
+             '--set-mark', '0x01', '--dest', u'2404:6800:4004:80c::/64',
              '-m', 'udp', '-p', 'udp', '--dport', '8000:9000'),
         call(AF_INET6, 'mangle', '-A', 'sshuttle-t-1024', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1', '--dest', u'2404:6800:4004:80c::/64',
+             '--tproxy-mark', '0x01', '--dest',
+             u'2404:6800:4004:80c::/64',
              '-m', 'udp', '-p', 'udp', '--dport', '8000:9000',
              '--on-port', '1024')
     ]
     mock_ipt_chain_exists.reset_mock()
-    mock_ipt_ttl.reset_mock()
     mock_ipt.reset_mock()
 
-    method.restore_firewall(1025, AF_INET6, True, None)
+    method.restore_firewall(1025, AF_INET6, True, None, None)
     assert mock_ipt_chain_exists.mock_calls == [
         call(AF_INET6, 'mangle', 'sshuttle-m-1025'),
         call(AF_INET6, 'mangle', 'sshuttle-t-1025'),
         call(AF_INET6, 'mangle', 'sshuttle-d-1025')
     ]
-    assert mock_ipt_ttl.mock_calls == []
     assert mock_ipt.mock_calls == [
         call(AF_INET6, 'mangle', '-D', 'OUTPUT', '-j', 'sshuttle-m-1025'),
         call(AF_INET6, 'mangle', '-F', 'sshuttle-m-1025'),
@@ -201,7 +190,6 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
         call(AF_INET6, 'mangle', '-X', 'sshuttle-d-1025')
     ]
     mock_ipt_chain_exists.reset_mock()
-    mock_ipt_ttl.reset_mock()
     mock_ipt.reset_mock()
 
     # IPV4
@@ -214,13 +202,13 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
             (AF_INET, 32, True, u'1.2.3.66', 80, 80)],
         True,
         None,
-        63)
+        None,
+        '0x01')
     assert mock_ipt_chain_exists.mock_calls == [
         call(AF_INET, 'mangle', 'sshuttle-m-1025'),
         call(AF_INET, 'mangle', 'sshuttle-t-1025'),
         call(AF_INET, 'mangle', 'sshuttle-d-1025')
     ]
-    assert mock_ipt_ttl.mock_calls == []
     assert mock_ipt.mock_calls == [
         call(AF_INET, 'mangle', '-D', 'OUTPUT', '-j', 'sshuttle-m-1025'),
         call(AF_INET, 'mangle', '-F', 'sshuttle-m-1025'),
@@ -239,23 +227,23 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
         call(AF_INET, 'mangle', '-I', 'OUTPUT', '1', '-j', 'sshuttle-m-1025'),
         call(AF_INET, 'mangle', '-I', 'PREROUTING', '1', '-j',
              'sshuttle-t-1025'),
+        call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'MARK',
+             '--set-mark', '0x01', '--dest', u'1.2.3.33/32',
+             '-m', 'udp', '-p', 'udp', '--dport', '53'),
+        call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-j', 'TPROXY',
+             '--tproxy-mark', '0x01', '--dest', u'1.2.3.33/32',
+             '-m', 'udp', '-p', 'udp', '--dport', '53', '--on-port', '1027'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-j', 'RETURN',
              '-m', 'addrtype', '--dst-type', 'LOCAL'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'RETURN',
              '-m', 'addrtype', '--dst-type', 'LOCAL'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-d-1025',
-             '-j', 'MARK', '--set-mark', '1'),
+             '-j', 'MARK', '--set-mark', '0x01'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-d-1025', '-j', 'ACCEPT'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-m', 'socket',
              '-j', 'sshuttle-d-1025', '-m', 'tcp', '-p', 'tcp'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-m', 'socket',
              '-j', 'sshuttle-d-1025', '-m', 'udp', '-p', 'udp'),
-        call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'1.2.3.33/32',
-             '-m', 'udp', '-p', 'udp', '--dport', '53'),
-        call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1', '--dest', u'1.2.3.33/32',
-             '-m', 'udp', '-p', 'udp', '--dport', '53', '--on-port', '1027'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'RETURN',
              '--dest', u'1.2.3.66/32', '-m', 'tcp', '-p', 'tcp',
              '--dport', '80:80'),
@@ -269,29 +257,27 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
              '--dest', u'1.2.3.66/32', '-m', 'udp', '-p', 'udp',
              '--dport', '80:80'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'1.2.3.0/24',
+             '--set-mark', '0x01', '--dest', u'1.2.3.0/24',
              '-m', 'tcp', '-p', 'tcp'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1', '--dest', u'1.2.3.0/24',
+             '--tproxy-mark', '0x01', '--dest', u'1.2.3.0/24',
              '-m', 'tcp', '-p', 'tcp', '--on-port', '1025'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-m-1025', '-j', 'MARK',
-             '--set-mark', '1', '--dest', u'1.2.3.0/24',
+             '--set-mark', '0x01', '--dest', u'1.2.3.0/24',
              '-m', 'udp', '-p', 'udp'),
         call(AF_INET, 'mangle', '-A', 'sshuttle-t-1025', '-j', 'TPROXY',
-             '--tproxy-mark', '0x1/0x1', '--dest', u'1.2.3.0/24',
+             '--tproxy-mark', '0x01', '--dest', u'1.2.3.0/24',
              '-m', 'udp', '-p', 'udp', '--on-port', '1025')
     ]
     mock_ipt_chain_exists.reset_mock()
-    mock_ipt_ttl.reset_mock()
     mock_ipt.reset_mock()
 
-    method.restore_firewall(1025, AF_INET, True, None)
+    method.restore_firewall(1025, AF_INET, True, None, None)
     assert mock_ipt_chain_exists.mock_calls == [
         call(AF_INET, 'mangle', 'sshuttle-m-1025'),
         call(AF_INET, 'mangle', 'sshuttle-t-1025'),
         call(AF_INET, 'mangle', 'sshuttle-d-1025')
     ]
-    assert mock_ipt_ttl.mock_calls == []
     assert mock_ipt.mock_calls == [
         call(AF_INET, 'mangle', '-D', 'OUTPUT', '-j', 'sshuttle-m-1025'),
         call(AF_INET, 'mangle', '-F', 'sshuttle-m-1025'),
@@ -303,5 +289,4 @@ def test_setup_firewall(mock_ipt_chain_exists, mock_ipt_ttl, mock_ipt):
         call(AF_INET, 'mangle', '-X', 'sshuttle-d-1025')
     ]
     mock_ipt_chain_exists.reset_mock()
-    mock_ipt_ttl.reset_mock()
     mock_ipt.reset_mock()

@@ -4,14 +4,14 @@ sshuttle
 
 Synopsis
 --------
-**sshuttle** [*options*] [**-r** *[username@]sshserver[:port]*] \<*subnets* ...\>
+**sshuttle** [*options*] **-r** *[username@]sshserver[:port]* \<*subnets* ...\>
 
 
 Description
 -----------
 :program:`sshuttle` allows you to create a VPN connection from your
-machine to any remote server that you can connect to via
-ssh, as long as that server has python 3.6 or higher.
+machine to any remote server that you can connect to via ssh, as long
+as that server has a sufficiently new Python installation.
 
 To work, you must have root access on the local machine,
 but you can have a normal account on the server.
@@ -31,22 +31,23 @@ Options
 .. option:: <subnets>
 
     A list of subnets to route over the VPN, in the form
-    ``a.b.c.d[/width][port[-port]]``.  Valid examples are 1.2.3.4 (a
-    single IP address), 1.2.3.4/32 (equivalent to 1.2.3.4),
-    1.2.3.0/24 (a 24-bit subnet, ie. with a 255.255.255.0
-    netmask), and 0/0 ('just route everything through the
-    VPN'). Any of the previous examples are also valid if you append
-    a port or a port range, so 1.2.3.4:8000 will only tunnel traffic
-    that has as the destination port 8000 of 1.2.3.4 and
-    1.2.3.0/24:8000-9000 will tunnel traffic going to any port between
-    8000 and 9000 (inclusive) for all IPs in the 1.2.3.0/24 subnet.
-    A hostname can be provided instead of an IP address. If the
-    hostname resolves to multiple IPs, all of the IPs are included.
-    If a width is provided with a hostname that the width is applied
-    to all of the hostnames IPs (if they are all either IPv4 or IPv6).
-    Widths cannot be supplied to hostnames that resolve to both IPv4
-    and IPv6. Valid examples are example.com, example.com:8000,
-    example.com/24, example.com/24:8000 and example.com:8000-9000.
+    ``a.b.c.d[/width][port[-port]]``. Valid examples are 1.2.3.4 (a
+    single IP address) and 1.2.3.4/32 (equivalent to 1.2.3.4),
+    1.2.3.0/24 (a 24-bit subnet, ie. with a 255.255.255.0 netmask).
+    Specify subnets 0/0 to match all IPv4 addresses and ::/0 to match
+    all IPv6 addresses. Any of the previous examples are also valid if
+    you append a port or a port range, so 1.2.3.4:8000 will only
+    tunnel traffic that has as the destination port 8000 of 1.2.3.4
+    and 1.2.3.0/24:8000-9000 will tunnel traffic going to any port
+    between 8000 and 9000 (inclusive) for all IPs in the 1.2.3.0/24
+    subnet. A hostname can be provided instead of an IP address. If
+    the hostname resolves to multiple IPs, all of the IPs are
+    included. If a width is provided with a hostname, the width is
+    applied to all of the hostnames IPs (if they are all either IPv4
+    or IPv6). Widths cannot be supplied to hostnames that resolve to
+    both IPv4 and IPv6. Valid examples are example.com,
+    example.com:8000, example.com/24, example.com/24:8000 and
+    example.com:8000-9000.
 
 .. option:: --method <auto|nat|nft|tproxy|pf|ipfw>
 
@@ -88,13 +89,21 @@ Options
     few subnets over the VPN, you probably would prefer to
     keep using your local DNS server for everything else.
 
+    :program:`sshuttle` tries to store a cache of the hostnames in
+    ~/.sshuttle.hosts on the remote host. Similarly, it tries to read
+    the file when you later reconnect to the host with --auto-hosts
+    enabled to quickly populate the host list. When troubleshooting
+    this feature, try removing this file on the remote host when
+    sshuttle is not running.
+
 .. option:: -N, --auto-nets
 
     In addition to the subnets provided on the command
     line, ask the server which subnets it thinks we should
     route, and route those automatically.  The suggestions
     are taken automatically from the server's routing
-    table.
+    table. Suggested subnets that fall within a subnet
+    excluded with :option:`-x` are ignored.
 
     This feature does not detect IPv6 routes. Specify IPv6 subnets
     manually. For example, specify the ``::/0`` subnet on the command
@@ -110,6 +119,14 @@ Options
     using the DNS specified via the :option:`--to-ns` option,
     if specified. Only plain DNS traffic sent to these servers
     on port 53 are captured.
+
+.. option:: --no-flush-dns
+
+    Skip flushing the systemd DNS resolver cache at startup and shutdown.
+    By default, sshuttle flushes this cache on Linux so cached responses
+    do not bypass DNS forwarding. Use this option when managing the cache
+    yourself or when systemd-resolved is unavailable. Cached DNS answers
+    may remain until they expire or are flushed manually.
 
 .. option:: --ns-hosts=<server1[,server2[,server3[...]]]>
 
@@ -141,7 +158,10 @@ Options
     The remote hostname and optional username and ssh
     port number to use for connecting to the remote server.
     For example, example.com, testuser@example.com,
-    testuser@example.com:2222, or example.com:2244.
+    testuser@example.com:2222, or example.com:2244. This
+    hostname is passed to ssh, so it will recognize any
+    aliases and settings you may have configured in
+    ~/.ssh/config.
 
 .. option:: -x <subnet>, --exclude=<subnet>
 
@@ -170,11 +190,23 @@ Options
     in a non-standard location or you want to provide extra
     options to the ssh command, for example, ``-e 'ssh -v'``.
 
+.. option:: --remote-shell
+
+    For Windows targets, specify configured remote shell program alternative to defacto posix shell.
+    It would be either ``cmd`` or ``powershell`` unless something like git-bash is in use.
+
+.. option:: --no-cmd-delimiter
+
+    Do not add a double dash (--) delimiter before invoking Python on
+    the remote host. This option is useful when the ssh command used
+    to connect is a custom command that does not interpret this
+    delimiter correctly.
+
 .. option:: --seed-hosts
 
     A comma-separated list of hostnames to use to
     initialize the :option:`--auto-hosts` scan algorithm.
-    :option:`--auto-hosts` does things like poll local SMB servers
+    :option:`--auto-hosts` does things like poll netstat output
     for lists of local hostnames, but can speed things up
     if you use this option to give it a few names to start
     from.
@@ -207,6 +239,11 @@ Options
     to be made between latency and bandwidth without completely
     disabling latency control (with :option:`--no-latency-control`).
 
+.. option:: --wrap=<num>
+
+    Restart counting channel numbers after *num*. This option is
+    only meant for testing.
+
 .. option:: -D, --daemon
 
     Automatically fork into the background after connecting
@@ -231,8 +268,19 @@ Options
 
 .. option:: --disable-ipv6
 
-    Disable IPv6 support for methods that support it (nft, tproxy, and
-    pf).
+    Disable IPv6 support for methods that support it (nat, nft,
+    tproxy, and pf).
+
+.. option:: --user=<user>
+
+    Apply all the rules only to this linux user. Only supported by
+    the nat method.
+
+.. option:: --group=<group>
+
+    Apply all the rules only to this linux group. Processes that have
+    this group as a supplementary group also match. Only supported by
+    the nat method.
 
 .. option:: --firewall
 
@@ -251,34 +299,47 @@ Options
     makes it a lot easier to debug and test the :option:`--auto-hosts`
     feature.
 
-.. option:: --sudoers
-
-    sshuttle will auto generate the proper sudoers.d config file and add it.
-    Once this is completed, sshuttle will exit and tell the user if
-    it succeed or not. Do not call this options with sudo, it may generate a
-    incorrect config file.
-
 .. option:: --sudoers-no-modify
 
-    sshuttle will auto generate the proper sudoers.d config and print it to
-    stdout. The option will not modify the system at all.
+    sshuttle prints a configuration to stdout which allows a user to
+    run sshuttle without a password. This option is INSECURE because,
+    with some cleverness, it also allows the user to run any command
+    as root without a password. The output also includes a suggested
+    method for you to install the configuration.
+
+    Use --sudoers-user to modify the user that it applies to.
 
 .. option:: --sudoers-user
 
-    Set the user name or group with %group_name for passwordless operation.
-    Default is the current user.set ALL for all users. Only works with
-    --sudoers or --sudoers-no-modify option.
+    Set the user name or group with %group_name for passwordless
+    operation. Default is the current user. Set to ALL for all users
+    (NOT RECOMMENDED: See note about security in --sudoers-no-modify
+    documentation above). Only works with the --sudoers-no-modify
+    option.
 
-.. option:: --sudoers-filename
+.. option:: --no-sudo-pythonpath
 
-    Set the file name for the sudoers.d file to be added. Default is
-    "sshuttle_auto". Only works with --sudoers.
+    Do not set PYTHONPATH when invoking sudo (or doas) to start the
+    firewall manager. By default, it is set to the directory that
+    contains the :program:`sshuttle` package.
 
-.. option:: -t, --tmark
+.. option:: -t <mark>, --tmark=<mark>
 
-    Transproxy optional traffic mark with provided MARK value.
+    An option used by the tproxy method: Use the specified traffic
+    mark. The mark must be a hexadecimal value. Defaults to 0x01.
 
-.. option:: --version
+.. option:: --namespace=<name>
+
+    (Linux only) Run inside of the net namespace with the given name,
+    as found in /var/run/netns. Cannot be combined with
+    :option:`--namespace-pid`.
+
+.. option:: --namespace-pid=<pid>
+
+    (Linux only) Run inside the net namespace used by the process
+    with the given pid. Cannot be combined with :option:`--namespace`.
+
+.. option:: -V, --version
 
     Print program version.
 
@@ -305,11 +366,14 @@ Arguments read from a file must be one per line, as shown below::
     --option2
     value2
 
-Comments in config file
-.......................
+An option and its value can also share a line, as they would on the
+command line::
 
-It's possible to add comments in the configuration file. This allows annotating the
-various subnets with human-readable descriptions, like::
+    --option1 value1
+    -r user@example.com
+
+The configuration file supports comments for human-readable
+annotations. For example::
 
     # company-internal API
     8.8.8.8/32
@@ -317,53 +381,109 @@ various subnets with human-readable descriptions, like::
     192.168.63.0/24
 
 
+Environment Variable
+--------------------
+
+You can specify command line options with the `SSHUTTLE_ARGS` environment
+variable. If a given option is defined in both the environment variable and
+command line, the value on the command line will take precedence.
+
+For example::
+
+    SSHUTTLE_ARGS="-e 'ssh -v' --dns" sshuttle -r example.com 0/0
+
+
 Examples
 --------
-Test locally by proxying all local connections, without using ssh::
 
-    $ sshuttle -v 0/0
+Use the following command to route all IPv4 TCP traffic through remote
+(-r) host example.com (and possibly other traffic too, depending on
+the selected --method). The 0/0 subnet, short for 0.0.0.0/0, matches
+all IPv4 addresses. The ::/0 subnet, matching all IPv6 addresses could
+be added to the example. The SSH connection endpoint is automatically
+excluded from forwarding. When `ProxyCommand` is configured,
+automatic exclusion is skipped; use :option:`-x` to exclude the
+required address manually. Press Ctrl+C to exit. To also route DNS
+queries through sshuttle, try adding --dns. Add or remove -v options
+to see more or less information::
 
-    Starting sshuttle proxy.
-    Listening on ('0.0.0.0', 12300).
+    $ sshuttle -r example.com 0/0
+
+    Starting sshuttle proxy (version ...).
     [local sudo] Password:
-    firewall manager ready.
-    c : connecting to server...
-     s: available routes:
-     s:   192.168.42.0/24
-    c : connected.
-    firewall manager: starting transproxy.
-    c : Accept: 192.168.42.106:50035 -> 192.168.42.121:139.
-    c : Accept: 192.168.42.121:47523 -> 77.141.99.22:443.
-        ...etc...
+    fw: Starting firewall with Python version 3.9.5
+    fw: ready method name nat.
+    c : IPv6 disabled since it isn't supported by method nat.
+    c : Method: nat
+    c : IPv4: on
+    c : IPv6: off (not available with nat method)
+    c : UDP : off (not available with nat method)
+    c : DNS : off (available)
+    c : User: off (available)
+    c : Subnets to forward through remote host (type, IP, cidr mask width, startPort, endPort):
+    c :   (<AddressFamily.AF_INET: 2>, '0.0.0.0', 0, 0, 0)
+    c : Subnets to exclude from forwarding:
+    c :   (<AddressFamily.AF_INET: 2>, '127.0.0.1', 32, 0, 0)
+    c :   (<AddressFamily.AF_INET: 2>, '...', 32, 0, 0)
+    c : TCP redirector listening on ('127.0.0.1', 12299).
+    c : Starting client with Python version 3.9.5
+    c : Connecting to server...
+    user@example.com's password:
+     s: Starting server with Python version 3.6.8
+     s: latency control setting = True
+     s: auto-nets:False
+    c : Connected to server.
+    fw: setting up.
+    fw: iptables -w -t nat -N sshuttle-12299
+    fw: iptables -w -t nat -F sshuttle-12299
+    ...
+    Accept: 192.168.42.121:60554 -> 77.141.99.22:22.
     ^C
-    firewall manager: undoing changes.
-    KeyboardInterrupt
     c : Keyboard interrupt: exiting.
-    c : SW#8:192.168.42.121:47523: deleting
-    c : SW#6:192.168.42.106:50035: deleting
+    c : SW'unknown':Mux#1: deleting (1 remain)
+    c : SW#7:192.168.42.121:60554: deleting (0 remain)
 
-Test connection to a remote server, with automatic hostname
+
+Connect to a remote server, with automatic hostname
 and subnet guessing::
 
-    $ sshuttle -vNHr example.org
-
-    Starting sshuttle proxy.
-    Listening on ('0.0.0.0', 12300).
-    firewall manager ready.
-    c : connecting to server...
+    $ sshuttle -vNHr example.com
+    Starting sshuttle proxy (version ...).
+    [local sudo] Password:
+    fw: Starting firewall with Python version 3.9.5
+    fw: ready method name nat.
+    c : IPv6 disabled since it isn't supported by method nat.
+    c : Method: nat
+    c : IPv4: on
+    c : IPv6: off (not available with nat method)
+    c : UDP : off (not available with nat method)
+    c : DNS : off (available)
+    c : User: off (available)
+    c : Subnets to forward through remote host (type, IP, cidr mask width, startPort, endPort):
+    c : NOTE: Additional subnets to forward may be added below by --auto-nets.
+    c : Subnets to exclude from forwarding:
+    c :   (<AddressFamily.AF_INET: 2>, '127.0.0.1', 32, 0, 0)
+    c :   (<AddressFamily.AF_INET: 2>, '...', 32, 0, 0)
+    c : TCP redirector listening on ('127.0.0.1', 12300).
+    c : Starting client with Python version 3.9.5
+    c : Connecting to server...
+    user@example.com's password:
+     s: Starting server with Python version 3.6.8
+     s: latency control setting = True
+     s: auto-nets:True
+    c : Connected to server.
+    c : seed_hosts: []
      s: available routes:
      s:   77.141.99.0/24
-    c : connected.
-    c : seed_hosts: []
-    firewall manager: starting transproxy.
-    hostwatch: Found: testbox1: 1.2.3.4
-    hostwatch: Found: mytest2: 5.6.7.8
-    hostwatch: Found: domaincontroller: 99.1.2.3
+    fw: setting up.
+    fw: iptables -w -t nat -N sshuttle-12300
+    fw: iptables -w -t nat -F sshuttle-12300
+    ...
     c : Accept: 192.168.42.121:60554 -> 77.141.99.22:22.
     ^C
-    firewall manager: undoing changes.
     c : Keyboard interrupt: exiting.
-    c : SW#6:192.168.42.121:60554: deleting
+    c : SW'unknown':Mux#1: deleting (1 remain)
+    c : SW#7:192.168.42.121:60554: deleting (0 remain)
 
 Run :program:`sshuttle` with a `/etc/sshuttle.conf` configuration file::
 
@@ -387,9 +507,7 @@ Example configuration file::
 Discussion
 ----------
 When it starts, :program:`sshuttle` creates an ssh session to the
-server specified by the ``-r`` option.  If ``-r`` is omitted,
-it will start both its client and server locally, which is
-sometimes useful for testing.
+server specified by the ``-r`` option.
 
 After connecting to the remote server, :program:`sshuttle` uploads its
 (python) source code to the remote end and executes it
@@ -408,7 +526,7 @@ Packet-level forwarding (eg. using the tun/tap devices on
 Linux) seems elegant at first, but it results in
 several problems, notably the 'tcp over tcp' problem.  The
 tcp protocol depends fundamentally on packets being dropped
-in order to implement its congestion control agorithm; if
+in order to implement its congestion control algorithm; if
 you pass tcp packets through a tcp-based tunnel (such as
 ssh), the inner tcp packets will never be dropped, and so
 the inner tcp stream's congestion control will be
